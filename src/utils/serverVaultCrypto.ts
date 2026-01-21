@@ -29,6 +29,7 @@ export interface ServerVaultEntry {
     country: string;
     hosterName: string;
     sshPort: string;
+    sshKey: string;
     rootPassword: string;
     additionalUsers: string;
     quickCommands: string;

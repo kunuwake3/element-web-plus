@@ -33,6 +33,7 @@ import {
 } from "../../../../../utils/serverVaultCrypto";
 
 const ACCOUNT_DATA_TYPE = "com.element-web-plus.server_vault.v1";
+const LOCAL_STORAGE_KEY = "mx_server_vault_encrypted_v1";
 const DEFAULT_COUNTRIES = ["Germany", "Netherlands", "France", "United States", "United Kingdom"];
 const DEFAULT_CURRENCIES = ["USD", "EUR", "GBP", "RUB"];
 
@@ -53,6 +54,7 @@ const createEmptyEntry = (): ServerVaultEntry => {
         country: "",
         hosterName: "",
         sshPort: "22",
+        sshKey: "",
         rootPassword: "",
         additionalUsers: "",
         quickCommands: "",
@@ -114,6 +116,7 @@ const toVaultText = (vault: ServerVaultData): string => {
             lines.push(`  Country: ${entry.country}`);
             lines.push(`  Hoster: ${entry.hosterName}`);
             lines.push(`  SSH port: ${entry.sshPort}`);
+            lines.push(`  SSH key: ${entry.sshKey}`);
             lines.push(`  Root password: ${entry.rootPassword}`);
             lines.push(`  Additional users: ${entry.additionalUsers}`);
             lines.push(`  Quick commands: ${entry.quickCommands}`);
@@ -145,6 +148,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const [statusMessage, setStatusMessage] = useState<string>("");
     const [isBusy, setIsBusy] = useState<boolean>(false);
     const [hasRemoteVault, setHasRemoteVault] = useState<boolean>(false);
+    const [hasLocalVault, setHasLocalVault] = useState<boolean>(false);
     const [newCountry, setNewCountry] = useState<string>("");
     const [newCurrency, setNewCurrency] = useState<string>("");
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -152,6 +156,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     React.useEffect(() => {
         const accountData = cli.getAccountData(ACCOUNT_DATA_TYPE);
         setHasRemoteVault(Boolean(accountData?.getContent()?.ciphertext));
+        setHasLocalVault(Boolean(localStorage.getItem(LOCAL_STORAGE_KEY)));
         const onAccountData = (): void => {
             const updated = cli.getAccountData(ACCOUNT_DATA_TYPE);
             setHasRemoteVault(Boolean(updated?.getContent()?.ciphertext));
@@ -247,6 +252,17 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         }));
     };
 
+    const saveLocalPayload = (payload: EncryptedServerVaultPayload): void => {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
+        setHasLocalVault(true);
+    };
+
+    const loadLocalPayload = (): EncryptedServerVaultPayload | null => {
+        const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw) as EncryptedServerVaultPayload;
+    };
+
     const addHoster = (): void => {
         const hoster: ServerVaultHoster = {
             id: secureRandomString(8),
@@ -279,6 +295,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         setIsBusy(true);
         try {
             const encrypted = await encryptServerVault(vault, password);
+            saveLocalPayload(encrypted);
             await downloadFile("server-vault.encrypted.json", JSON.stringify(encrypted, null, 2));
             setStatusMessage(_t("settings|server_vault|export_success"));
         } catch (error) {
@@ -302,6 +319,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             const decrypted = normalizeVault(await decryptServerVault(payload, password));
             setVault(decrypted);
             setActiveDatabaseId(decrypted.databases[0].id);
+            saveLocalPayload(payload);
             setStatusMessage(_t("settings|server_vault|import_success"));
         } catch (error) {
             setStatusMessage(_t("settings|server_vault|import_failed"));
@@ -322,6 +340,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         try {
             const encrypted = await encryptServerVault(vault, password);
             await cli.setAccountData(ACCOUNT_DATA_TYPE, encrypted);
+            saveLocalPayload(encrypted);
             setStatusMessage(_t("settings|server_vault|sync_success"));
         } catch (error) {
             setStatusMessage(_t("settings|server_vault|sync_failed"));
@@ -344,10 +363,51 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                 const decrypted = normalizeVault(await decryptServerVault(data, password));
                 setVault(decrypted);
                 setActiveDatabaseId(decrypted.databases[0].id);
+                saveLocalPayload(data);
                 setStatusMessage(_t("settings|server_vault|import_success"));
             }
         } catch (error) {
             setStatusMessage(_t("settings|server_vault|import_failed"));
+        } finally {
+            setIsBusy(false);
+        }
+    };
+
+    const handleSaveLocal = async (): Promise<void> => {
+        if (!password) {
+            setStatusMessage(_t("settings|server_vault|password_required"));
+            return;
+        }
+        setIsBusy(true);
+        try {
+            const encrypted = await encryptServerVault(vault, password);
+            saveLocalPayload(encrypted);
+            setStatusMessage(_t("settings|server_vault|local_save_success"));
+        } catch (error) {
+            setStatusMessage(_t("settings|server_vault|local_save_failed"));
+        } finally {
+            setIsBusy(false);
+        }
+    };
+
+    const handleLoadLocal = async (): Promise<void> => {
+        if (!password) {
+            setStatusMessage(_t("settings|server_vault|password_required"));
+            return;
+        }
+        setIsBusy(true);
+        try {
+            const payload = loadLocalPayload();
+            if (!payload?.ciphertext) {
+                setStatusMessage(_t("settings|server_vault|no_local_data"));
+            } else {
+                const decrypted = normalizeVault(await decryptServerVault(payload, password));
+                setVault(decrypted);
+                setActiveDatabaseId(decrypted.databases[0].id);
+                setStatusMessage(_t("settings|server_vault|local_load_success"));
+            }
+        } catch (error) {
+            setStatusMessage(_t("settings|server_vault|local_load_failed"));
         } finally {
             setIsBusy(false);
         }
@@ -423,6 +483,16 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                             >
                                 {_t("settings|server_vault|load_sync")}
                             </AccessibleButton>
+                            <AccessibleButton kind="secondary" onClick={handleSaveLocal} disabled={isBusy}>
+                                {_t("settings|server_vault|save_local")}
+                            </AccessibleButton>
+                            <AccessibleButton
+                                kind="secondary"
+                                onClick={handleLoadLocal}
+                                disabled={isBusy || !hasLocalVault}
+                            >
+                                {_t("settings|server_vault|load_local")}
+                            </AccessibleButton>
                         </div>
                         <div className="mx_ServerVaultUserSettingsTab_storageButtons">
                             <AccessibleButton kind="secondary" onClick={handleExportText} disabled={isBusy}>
@@ -444,6 +514,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                 />
                             </label>
                         </div>
+                        <SettingsSubsectionText>{_t("settings|server_vault|local_storage_help")}</SettingsSubsectionText>
                         {statusMessage && (
                             <div className="mx_ServerVaultUserSettingsTab_status" role="status">
                                 {statusMessage}
@@ -608,6 +679,25 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         postfixComponent={
                                                             <CopyTextButton
                                                                 getTextToCopy={() => entry.sshPort}
+                                                                className="mx_ServerVaultUserSettingsTab_copyButton"
+                                                            >
+                                                                <CopyIcon />
+                                                            </CopyTextButton>
+                                                        }
+                                                    />
+                                                    <Field
+                                                        element="textarea"
+                                                        label={_t("settings|server_vault|field_ssh_key")}
+                                                        value={entry.sshKey}
+                                                        onChange={(event) =>
+                                                            updateEntry(entry.id, (item) => ({
+                                                                ...item,
+                                                                sshKey: event.target.value,
+                                                            }))
+                                                        }
+                                                        postfixComponent={
+                                                            <CopyTextButton
+                                                                getTextToCopy={() => entry.sshKey}
                                                                 className="mx_ServerVaultUserSettingsTab_copyButton"
                                                             >
                                                                 <CopyIcon />
