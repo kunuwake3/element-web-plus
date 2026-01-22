@@ -1,0 +1,35 @@
+name: Server vault smoke tests
+
+on:
+    pull_request: {}
+    push:
+        branches: [develop, master]
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+    server_vault_tests:
+        name: Server vault tests
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+
+            - name: Setup Node
+              uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
+              with:
+                  node-version: "lts/*"
+                  cache: "yarn"
+
+            - name: Install deps
+              run: ./scripts/layered.sh
+
+            - name: Run server vault tests
+              run: |
+                  yarn test \
+                      test/unit-tests/utils/serverVaultCrypto-test.ts \
+                      test/unit-tests/utils/serverVaultSync-test.ts

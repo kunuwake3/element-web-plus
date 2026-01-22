@@ -1,0 +1,148 @@
+.mx_ServerVaultUserSettingsTab {
+    .mx_ServerVaultUserSettingsTab_storageControls {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_storageButtons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+    }
+
+    .mx_ServerVaultUserSettingsTab_fileInput {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+
+        input {
+            display: inline-flex;
+        }
+    }
+
+    .mx_ServerVaultUserSettingsTab_status {
+        color: var(--cpd-color-text-secondary);
+    }
+
+    .mx_ServerVaultUserSettingsTab_databases {
+        display: grid;
+        grid-template-columns: minmax(220px, 260px) 1fr;
+        gap: 24px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_databaseTabs {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_databaseTab {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        .mx_ServerVaultUserSettingsTab_databaseTab--active {
+            box-shadow: inset 0 0 0 2px var(--cpd-color-text-accent);
+        }
+    }
+
+    .mx_ServerVaultUserSettingsTab_databaseRemove {
+        padding-inline: 8px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_sharedControls {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 12px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_sharedControls .mx_ServerVaultUserSettingsTab_storageButtons {
+        gap: 8px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_records {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        margin-top: 16px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_recordsHeader {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        font-weight: 600;
+        color: var(--cpd-color-text-secondary);
+    }
+
+    .mx_ServerVaultUserSettingsTab_record {
+        border: 1px solid var(--cpd-color-gray-300);
+        border-radius: 8px;
+        padding: 12px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_recordSummary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        text-align: left;
+    }
+
+    .mx_ServerVaultUserSettingsTab_recordDetails {
+        margin-top: 12px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_fieldGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_copyButton {
+        margin-left: 8px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_listEditor {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_listItems {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_listChip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: var(--cpd-color-gray-200);
+    }
+
+    .mx_ServerVaultUserSettingsTab_listAdd {
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_hosters {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .mx_ServerVaultUserSettingsTab_hoster {
+        border: 1px dashed var(--cpd-color-gray-300);
+        border-radius: 8px;
+        padding: 12px;
+        display: grid;
+        gap: 12px;
+    }
+}
