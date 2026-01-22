@@ -4210,7 +4210,6 @@
     "settings|server_vault|local_save_failed": "Failed to save local vault.",
     "settings|server_vault|local_load_success": "Local vault loaded.",
     "settings|server_vault|local_load_failed": "Failed to load local vault.",
-    "settings|server_vault|sync_conflict_resolved": "Sync completed and conflicts were resolved.",
     "settings|server_vault|databases_title": "Databases",
     "settings|server_vault|default_db": "Default database",
     "settings|server_vault|new_db": "New database",

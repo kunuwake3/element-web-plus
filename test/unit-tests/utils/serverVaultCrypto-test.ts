@@ -16,20 +16,20 @@ import {
 
 describe("serverVaultCrypto", () => {
     beforeAll(() => {
-        Object.defineProperty(globalThis, "crypto", {
-            value: webcrypto,
-            configurable: true,
-        });
+        if (!globalThis.crypto) {
+            Object.defineProperty(globalThis, "crypto", {
+                value: webcrypto,
+                configurable: true,
+            });
+        }
     });
 
     const sampleVault: ServerVaultData = {
         version: SERVER_VAULT_VERSION,
-        updatedAt: 1,
         databases: [
             {
                 id: "db-1",
                 name: "Main",
-                updatedAt: 1,
                 entries: [
                     {
                         id: "entry-1",
@@ -55,7 +55,6 @@ describe("serverVaultCrypto", () => {
                         emailLogin: "email",
                         emailPassword: "mailpass",
                         notes: "notes",
-                        updatedAt: 1,
                     },
                 ],
             },

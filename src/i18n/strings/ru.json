@@ -4234,7 +4234,6 @@
     "settings|server_vault|local_save_failed": "Не удалось сохранить локальное хранилище.",
     "settings|server_vault|local_load_success": "Локальное хранилище загружено.",
     "settings|server_vault|local_load_failed": "Не удалось загрузить локальное хранилище.",
-    "settings|server_vault|sync_conflict_resolved": "Синхронизация завершена, конфликты разрешены.",
     "settings|server_vault|databases_title": "Базы данных",
     "settings|server_vault|default_db": "База по умолчанию",
     "settings|server_vault|new_db": "Новая база",

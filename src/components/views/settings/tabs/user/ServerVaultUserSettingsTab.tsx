@@ -48,7 +48,6 @@ const formatDate = (date: Date): string => date.toISOString().slice(0, 10);
 
 const createEmptyEntry = (): ServerVaultEntry => {
     const now = new Date();
-    const nowTimestamp = Date.now();
     return {
         id: secureRandomString(8),
         serverName: "",
@@ -73,7 +72,6 @@ const createEmptyEntry = (): ServerVaultEntry => {
         emailLogin: "",
         emailPassword: "",
         notes: "",
-        updatedAt: nowTimestamp,
     };
 };
 
@@ -81,7 +79,6 @@ const createDefaultDatabase = (): ServerVaultDatabase => ({
     id: secureRandomString(8),
     name: _t("settings|server_vault|default_db"),
     entries: [createEmptyEntry()],
-    updatedAt: Date.now(),
 });
 
 const createDefaultVault = (): ServerVaultData => ({
@@ -91,16 +88,12 @@ const createDefaultVault = (): ServerVaultData => ({
     countries: [...DEFAULT_COUNTRIES],
     currencies: [...DEFAULT_CURRENCIES],
     reminderRoomId: "",
-    updatedAt: Date.now(),
 });
 
-const normalizeVault = (data: ServerVaultData): ServerVaultData => {
-    const normalized = normalizeServerVault(data);
-    return {
-        ...normalized,
-        databases: normalized.databases.length ? normalized.databases : [createDefaultDatabase()],
-    };
-};
+const normalizeVault = (data: ServerVaultData): ServerVaultData => ({
+    ...data,
+    databases: data.databases.length ? data.databases : [createDefaultDatabase()],
+});
 
 const formatSummary = (entry: ServerVaultEntry): string => {
     const summaryParts = [entry.ipAddress, entry.serverName, entry.renewalDate, entry.price];
@@ -183,9 +176,8 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const updateDatabase = (databaseId: string, updater: (database: ServerVaultDatabase) => ServerVaultDatabase): void => {
         setVault((prev) => ({
             ...prev,
-            updatedAt: Date.now(),
             databases: prev.databases.map((database) =>
-                database.id === databaseId ? updater({ ...database, updatedAt: Date.now() }) : database,
+                database.id === databaseId ? updater(database) : database,
             ),
         }));
     };
@@ -193,9 +185,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const updateEntry = (entryId: string, updater: (entry: ServerVaultEntry) => ServerVaultEntry): void => {
         updateDatabase(activeDatabase.id, (database) => ({
             ...database,
-            entries: database.entries.map((entry) =>
-                entry.id === entryId ? updater({ ...entry, updatedAt: Date.now() }) : entry,
-            ),
+            entries: database.entries.map((entry) => (entry.id === entryId ? updater(entry) : entry)),
         }));
     };
 
@@ -204,11 +194,9 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             id: secureRandomString(8),
             name: _t("settings|server_vault|new_db"),
             entries: [],
-            updatedAt: Date.now(),
         };
         setVault((prev) => ({
             ...prev,
-            updatedAt: Date.now(),
             databases: [...prev.databases, newDatabase],
         }));
         setActiveDatabaseId(newDatabase.id);
@@ -219,7 +207,6 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         const nextDatabases = remaining.length ? remaining : [createDefaultDatabase()];
         setVault((prev) => ({
             ...prev,
-            updatedAt: Date.now(),
             databases: nextDatabases,
         }));
         setActiveDatabaseId(nextDatabases[0].id);
@@ -248,7 +235,6 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         if (!value.trim()) return;
         setVault((prev) => ({
             ...prev,
-            updatedAt: Date.now(),
             [key]: Array.from(new Set([...prev[key], value.trim()])).sort(),
         }));
     };
@@ -256,7 +242,6 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const removeListValue = (key: "countries" | "currencies", value: string): void => {
         setVault((prev) => ({
             ...prev,
-            updatedAt: Date.now(),
             [key]: prev[key].filter((entry) => entry !== value),
         }));
     };
@@ -264,10 +249,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const updateHoster = (hosterId: string, updater: (hoster: ServerVaultHoster) => ServerVaultHoster): void => {
         setVault((prev) => ({
             ...prev,
-            updatedAt: Date.now(),
-            hosters: prev.hosters.map((hoster) =>
-                hoster.id === hosterId ? updater({ ...hoster, updatedAt: Date.now() }) : hoster,
-            ),
+            hosters: prev.hosters.map((hoster) => (hoster.id === hosterId ? updater(hoster) : hoster)),
         }));
     };
 
@@ -288,11 +270,9 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             name: "",
             url: "",
             notes: "",
-            updatedAt: Date.now(),
         };
         setVault((prev) => ({
             ...prev,
-            updatedAt: Date.now(),
             hosters: [...prev.hosters, hoster],
         }));
     };
@@ -300,7 +280,6 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const removeHoster = (hosterId: string): void => {
         setVault((prev) => ({
             ...prev,
-            updatedAt: Date.now(),
             hosters: prev.hosters.filter((hoster) => hoster.id !== hosterId),
         }));
     };
@@ -316,7 +295,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         }
         setIsBusy(true);
         try {
-            const encrypted = await encryptServerVault(normalizeVault(vault), password);
+            const encrypted = await encryptServerVault(vault, password);
             saveLocalPayload(encrypted);
             await downloadFile("server-vault.encrypted.json", JSON.stringify(encrypted, null, 2));
             setStatusMessage(_t("settings|server_vault|export_success"));
@@ -339,11 +318,9 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             const text = await file.text();
             const payload = JSON.parse(text) as EncryptedServerVaultPayload;
             const decrypted = normalizeVault(await decryptServerVault(payload, password));
-            const mergeResult = mergeServerVaults(normalizeVault(vault), decrypted);
-            setVault(mergeResult.merged);
-            setActiveDatabaseId(mergeResult.merged.databases[0].id);
-            const encryptedMerged = await encryptServerVault(mergeResult.merged, password);
-            saveLocalPayload(encryptedMerged);
+            setVault(decrypted);
+            setActiveDatabaseId(decrypted.databases[0].id);
+            saveLocalPayload(payload);
             setStatusMessage(_t("settings|server_vault|import_success"));
         } catch (error) {
             setStatusMessage(_t("settings|server_vault|import_failed"));
@@ -362,7 +339,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         }
         setIsBusy(true);
         try {
-            const encrypted = await encryptServerVault(normalizeVault(vault), password);
+            const encrypted = await encryptServerVault(vault, password);
             await cli.setAccountData(ACCOUNT_DATA_TYPE, encrypted);
             saveLocalPayload(encrypted);
             setStatusMessage(_t("settings|server_vault|sync_success"));
@@ -384,19 +361,11 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             if (!data?.ciphertext) {
                 setStatusMessage(_t("settings|server_vault|no_remote_data"));
             } else {
-                const remoteVault = normalizeVault(await decryptServerVault(data, password));
-                const localVault = normalizeVault(vault);
-                const mergeResult = mergeServerVaults(localVault, remoteVault);
-                setVault(mergeResult.merged);
-                setActiveDatabaseId(mergeResult.merged.databases[0].id);
-                const encryptedMerged = await encryptServerVault(mergeResult.merged, password);
-                await cli.setAccountData(ACCOUNT_DATA_TYPE, encryptedMerged);
-                saveLocalPayload(encryptedMerged);
-                setStatusMessage(
-                    mergeResult.hasConflicts
-                        ? _t("settings|server_vault|sync_conflict_resolved")
-                        : _t("settings|server_vault|import_success"),
-                );
+                const decrypted = normalizeVault(await decryptServerVault(data, password));
+                setVault(decrypted);
+                setActiveDatabaseId(decrypted.databases[0].id);
+                saveLocalPayload(data);
+                setStatusMessage(_t("settings|server_vault|import_success"));
             }
         } catch (error) {
             setStatusMessage(_t("settings|server_vault|import_failed"));
@@ -412,7 +381,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         }
         setIsBusy(true);
         try {
-            const encrypted = await encryptServerVault(normalizeVault(vault), password);
+            const encrypted = await encryptServerVault(vault, password);
             saveLocalPayload(encrypted);
             setStatusMessage(_t("settings|server_vault|local_save_success"));
         } catch (error) {
@@ -434,9 +403,8 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                 setStatusMessage(_t("settings|server_vault|no_local_data"));
             } else {
                 const decrypted = normalizeVault(await decryptServerVault(payload, password));
-                const mergeResult = mergeServerVaults(normalizeVault(vault), decrypted);
-                setVault(mergeResult.merged);
-                setActiveDatabaseId(mergeResult.merged.databases[0].id);
+                setVault(decrypted);
+                setActiveDatabaseId(decrypted.databases[0].id);
                 setStatusMessage(_t("settings|server_vault|local_load_success"));
             }
         } catch (error) {
@@ -1220,7 +1188,6 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                         onChange={(event) =>
                             setVault((prev) => ({
                                 ...prev,
-                                updatedAt: Date.now(),
                                 reminderRoomId: event.target.value,
                             }))
                         }
