@@ -31,6 +31,7 @@ import {
     type ServerVaultEntry,
     type ServerVaultHoster,
 } from "../../../../../utils/serverVaultCrypto";
+import { mergeServerVaults, normalizeServerVault } from "../../../../../utils/serverVaultSync";
 
 const ACCOUNT_DATA_TYPE = "com.element-web-plus.server_vault.v1";
 const LOCAL_STORAGE_KEY = "mx_server_vault_encrypted_v1";
