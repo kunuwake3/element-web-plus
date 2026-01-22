@@ -70,9 +70,9 @@ Open <http://127.0.0.1:8080/> in your browser to see your newly built Element.
 
 After starting Element, open **Settings → Server vault** to access the encrypted server database UI.
 
-* Set a vault password before saving, syncing, or importing data.
-* Use **Save & sync to Matrix** to store encrypted data in account data for multi-device sync.
-* For shared databases between admins, set the **Shared room ID** on a database, then use the
+- Set a vault password before saving, syncing, or importing data.
+- Use **Save & sync to Matrix** to store encrypted data in account data for multi-device sync.
+- For shared databases between admins, set the **Shared room ID** on a database, then use the
   lock controls (**Take edit lock** / **Release edit lock**) to switch between read-only and
   editor mode before syncing changes to the room.
 

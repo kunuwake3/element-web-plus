@@ -231,7 +231,7 @@ export default function UserSettingsDialog(props: IProps): JSX.Element {
                 _td("settings|server_vault|title"),
                 <FilesIcon />,
                 <ServerVaultUserSettingsTab />,
-                "UserSettingsServerVault",
+                "UserSettings",
             ),
         );
 

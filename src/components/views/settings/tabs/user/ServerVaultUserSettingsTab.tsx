@@ -7,14 +7,14 @@ Please see LICENSE files in the repository root for full details.
 
 import React, { type ChangeEvent, type JSX, useMemo, useRef, useState } from "react";
 import { ClientEvent } from "matrix-js-sdk/src/matrix";
+import { MsgType, type TimelineEvents } from "matrix-js-sdk/src/types";
 import { secureRandomString } from "matrix-js-sdk/src/randomstring";
 import classNames from "classnames";
 import { CopyIcon } from "@vector-im/compound-design-tokens/assets/web/icons";
 
 import SettingsTab from "../SettingsTab";
 import { SettingsSection } from "../../shared/SettingsSection";
-import { SettingsSubsection } from "../../shared/SettingsSubsection";
-import { SettingsSubsectionText } from "../../shared/SettingsSubsection";
+import { SettingsSubsection, SettingsSubsectionText } from "../../shared/SettingsSubsection";
 import { _t } from "../../../../../languageHandler";
 import Field from "../../../elements/Field";
 import AccessibleButton from "../../../elements/AccessibleButton";
@@ -165,6 +165,21 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [sharedLocks, setSharedLocks] = useState<Record<string, { userId: string } | null>>({});
 
+    const refreshSharedLock = React.useCallback(async (database: ServerVaultDatabase): Promise<void> => {
+        if (!database.sharedRoomId) return;
+        try {
+            const content = await cli.getStateEvent(
+                database.sharedRoomId,
+                SHARED_DB_LOCK_EVENT_TYPE,
+                database.id,
+            );
+            const userId = typeof content?.userId === "string" ? content.userId : "";
+            setSharedLocks((prev) => ({ ...prev, [database.id]: userId ? { userId } : null }));
+        } catch {
+            setSharedLocks((prev) => ({ ...prev, [database.id]: null }));
+        }
+    }, [cli]);
+
     React.useEffect(() => {
         const accountData = cli.getAccountData(ACCOUNT_DATA_TYPE);
         setHasRemoteVault(Boolean(accountData?.getContent()?.ciphertext));
@@ -190,7 +205,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         if (activeDatabase.sharedRoomId) {
             refreshSharedLock(activeDatabase);
         }
-    }, [activeDatabase, password]);
+    }, [activeDatabase, refreshSharedLock]);
 
     const updateDatabase = (databaseId: string, updater: (database: ServerVaultDatabase) => ServerVaultDatabase): void => {
         setVault((prev) => ({
@@ -217,6 +232,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             name: _t("settings|server_vault|new_db"),
             entries: [],
             updatedAt: Date.now(),
+            sharedRoomId: "",
         };
         setVault((prev) => ({
             ...prev,
@@ -283,32 +299,18 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         }));
     };
 
-    const refreshSharedLock = async (database: ServerVaultDatabase): Promise<void> => {
-        if (!database.sharedRoomId) return;
-        try {
-            const content = await cli.getStateEvent(
-                database.sharedRoomId,
-                SHARED_DB_LOCK_EVENT_TYPE,
-                database.id,
-            );
-            const userId = typeof content?.userId === "string" ? content.userId : "";
-            setSharedLocks((prev) => ({ ...prev, [database.id]: userId ? { userId } : null }));
-        } catch {
-            setSharedLocks((prev) => ({ ...prev, [database.id]: null }));
-        }
-    };
-
     const handleTakeEditLock = async (): Promise<void> => {
         if (!activeDatabase.sharedRoomId) return;
         setIsBusy(true);
         try {
+            const userId = cli.getUserId() ?? "";
             await cli.sendStateEvent(
                 activeDatabase.sharedRoomId,
                 SHARED_DB_LOCK_EVENT_TYPE,
-                { userId: cli.getUserId() },
+                { userId },
                 activeDatabase.id,
             );
-            setSharedLocks((prev) => ({ ...prev, [activeDatabase.id]: { userId: cli.getUserId() ?? "" } }));
+            setSharedLocks((prev) => ({ ...prev, [activeDatabase.id]: { userId } }));
             setStatusMessage(_t("settings|server_vault|lock_acquired"));
         } catch {
             setStatusMessage(_t("settings|server_vault|lock_failed"));
@@ -445,7 +447,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             saveLocalPayload(encrypted);
             await downloadFile("server-vault.encrypted.json", JSON.stringify(encrypted, null, 2));
             setStatusMessage(_t("settings|server_vault|export_success"));
-        } catch (error) {
+        } catch {
             setStatusMessage(_t("settings|server_vault|export_failed"));
         } finally {
             setIsBusy(false);
@@ -470,7 +472,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             const encryptedMerged = await encryptServerVault(mergeResult.merged, password);
             saveLocalPayload(encryptedMerged);
             setStatusMessage(_t("settings|server_vault|import_success"));
-        } catch (error) {
+        } catch {
             setStatusMessage(_t("settings|server_vault|import_failed"));
         } finally {
             setIsBusy(false);
@@ -491,7 +493,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             await cli.setAccountData(ACCOUNT_DATA_TYPE, encrypted);
             saveLocalPayload(encrypted);
             setStatusMessage(_t("settings|server_vault|sync_success"));
-        } catch (error) {
+        } catch {
             setStatusMessage(_t("settings|server_vault|sync_failed"));
         } finally {
             setIsBusy(false);
@@ -523,7 +525,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                         : _t("settings|server_vault|import_success"),
                 );
             }
-        } catch (error) {
+        } catch {
             setStatusMessage(_t("settings|server_vault|import_failed"));
         } finally {
             setIsBusy(false);
@@ -540,7 +542,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             const encrypted = await encryptServerVault(normalizeVault(vault), password);
             saveLocalPayload(encrypted);
             setStatusMessage(_t("settings|server_vault|local_save_success"));
-        } catch (error) {
+        } catch {
             setStatusMessage(_t("settings|server_vault|local_save_failed"));
         } finally {
             setIsBusy(false);
@@ -564,7 +566,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                 setActiveDatabaseId(mergeResult.merged.databases[0].id);
                 setStatusMessage(_t("settings|server_vault|local_load_success"));
             }
-        } catch (error) {
+        } catch {
             setStatusMessage(_t("settings|server_vault|local_load_failed"));
         } finally {
             setIsBusy(false);
@@ -599,12 +601,12 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                         entry.renewalDate
                     } (${entry.price} ${entry.currency})`,
             );
-            await cli.sendEvent(roomId, "m.room.message", {
-                msgtype: "m.text",
+            await cli.sendEvent(roomId, "m.room.message" as keyof TimelineEvents, {
+                msgtype: MsgType.Text,
                 body: `${_t("settings|server_vault|reminder_message")}\n${lines.join("\n")}`,
             });
             setStatusMessage(_t("settings|server_vault|reminder_sent"));
-        } catch (error) {
+        } catch {
             setStatusMessage(_t("settings|server_vault|reminder_failed"));
         } finally {
             setIsBusy(false);
