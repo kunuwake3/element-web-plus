@@ -35,6 +35,8 @@ import { mergeServerVaults, normalizeServerVault } from "../../../../../utils/se
 
 const ACCOUNT_DATA_TYPE = "com.element-web-plus.server_vault.v1";
 const LOCAL_STORAGE_KEY = "mx_server_vault_encrypted_v1";
+const SHARED_DB_EVENT_TYPE = "com.element-web-plus.server_vault.shared_db.v1";
+const SHARED_DB_LOCK_EVENT_TYPE = "com.element-web-plus.server_vault.shared_db_lock.v1";
 const DEFAULT_COUNTRIES = ["Germany", "Netherlands", "France", "United States", "United Kingdom"];
 const DEFAULT_CURRENCIES = ["USD", "EUR", "GBP", "RUB"];
 
@@ -48,6 +50,7 @@ const formatDate = (date: Date): string => date.toISOString().slice(0, 10);
 
 const createEmptyEntry = (): ServerVaultEntry => {
     const now = new Date();
+    const nowTimestamp = Date.now();
     return {
         id: secureRandomString(8),
         serverName: "",
@@ -72,6 +75,7 @@ const createEmptyEntry = (): ServerVaultEntry => {
         emailLogin: "",
         emailPassword: "",
         notes: "",
+        updatedAt: nowTimestamp,
     };
 };
 
@@ -79,6 +83,8 @@ const createDefaultDatabase = (): ServerVaultDatabase => ({
     id: secureRandomString(8),
     name: _t("settings|server_vault|default_db"),
     entries: [createEmptyEntry()],
+    updatedAt: Date.now(),
+    sharedRoomId: "",
 });
 
 const createDefaultVault = (): ServerVaultData => ({
@@ -88,12 +94,16 @@ const createDefaultVault = (): ServerVaultData => ({
     countries: [...DEFAULT_COUNTRIES],
     currencies: [...DEFAULT_CURRENCIES],
     reminderRoomId: "",
+    updatedAt: Date.now(),
 });
 
-const normalizeVault = (data: ServerVaultData): ServerVaultData => ({
-    ...data,
-    databases: data.databases.length ? data.databases : [createDefaultDatabase()],
-});
+const normalizeVault = (data: ServerVaultData): ServerVaultData => {
+    const normalized = normalizeServerVault(data);
+    return {
+        ...normalized,
+        databases: normalized.databases.length ? normalized.databases : [createDefaultDatabase()],
+    };
+};
 
 const formatSummary = (entry: ServerVaultEntry): string => {
     const summaryParts = [entry.ipAddress, entry.serverName, entry.renewalDate, entry.price];
@@ -153,6 +163,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const [newCountry, setNewCountry] = useState<string>("");
     const [newCurrency, setNewCurrency] = useState<string>("");
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [sharedLocks, setSharedLocks] = useState<Record<string, { userId: string } | null>>({});
 
     React.useEffect(() => {
         const accountData = cli.getAccountData(ACCOUNT_DATA_TYPE);
@@ -172,12 +183,21 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         () => vault.databases.find((database) => database.id === activeDatabaseId) ?? vault.databases[0],
         [vault, activeDatabaseId],
     );
+    const activeLockOwner = sharedLocks[activeDatabase.id]?.userId;
+    const isReadOnly = Boolean(activeDatabase.sharedRoomId) && activeLockOwner !== cli.getUserId();
+
+    React.useEffect(() => {
+        if (activeDatabase.sharedRoomId) {
+            refreshSharedLock(activeDatabase);
+        }
+    }, [activeDatabase, password]);
 
     const updateDatabase = (databaseId: string, updater: (database: ServerVaultDatabase) => ServerVaultDatabase): void => {
         setVault((prev) => ({
             ...prev,
+            updatedAt: Date.now(),
             databases: prev.databases.map((database) =>
-                database.id === databaseId ? updater(database) : database,
+                database.id === databaseId ? updater({ ...database, updatedAt: Date.now() }) : database,
             ),
         }));
     };
@@ -185,7 +205,9 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const updateEntry = (entryId: string, updater: (entry: ServerVaultEntry) => ServerVaultEntry): void => {
         updateDatabase(activeDatabase.id, (database) => ({
             ...database,
-            entries: database.entries.map((entry) => (entry.id === entryId ? updater(entry) : entry)),
+            entries: database.entries.map((entry) =>
+                entry.id === entryId ? updater({ ...entry, updatedAt: Date.now() }) : entry,
+            ),
         }));
     };
 
@@ -194,9 +216,11 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             id: secureRandomString(8),
             name: _t("settings|server_vault|new_db"),
             entries: [],
+            updatedAt: Date.now(),
         };
         setVault((prev) => ({
             ...prev,
+            updatedAt: Date.now(),
             databases: [...prev.databases, newDatabase],
         }));
         setActiveDatabaseId(newDatabase.id);
@@ -207,6 +231,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         const nextDatabases = remaining.length ? remaining : [createDefaultDatabase()];
         setVault((prev) => ({
             ...prev,
+            updatedAt: Date.now(),
             databases: nextDatabases,
         }));
         setActiveDatabaseId(nextDatabases[0].id);
@@ -235,6 +260,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         if (!value.trim()) return;
         setVault((prev) => ({
             ...prev,
+            updatedAt: Date.now(),
             [key]: Array.from(new Set([...prev[key], value.trim()])).sort(),
         }));
     };
@@ -242,6 +268,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const removeListValue = (key: "countries" | "currencies", value: string): void => {
         setVault((prev) => ({
             ...prev,
+            updatedAt: Date.now(),
             [key]: prev[key].filter((entry) => entry !== value),
         }));
     };
@@ -249,8 +276,124 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const updateHoster = (hosterId: string, updater: (hoster: ServerVaultHoster) => ServerVaultHoster): void => {
         setVault((prev) => ({
             ...prev,
-            hosters: prev.hosters.map((hoster) => (hoster.id === hosterId ? updater(hoster) : hoster)),
+            updatedAt: Date.now(),
+            hosters: prev.hosters.map((hoster) =>
+                hoster.id === hosterId ? updater({ ...hoster, updatedAt: Date.now() }) : hoster,
+            ),
         }));
+    };
+
+    const refreshSharedLock = async (database: ServerVaultDatabase): Promise<void> => {
+        if (!database.sharedRoomId) return;
+        try {
+            const content = await cli.getStateEvent(
+                database.sharedRoomId,
+                SHARED_DB_LOCK_EVENT_TYPE,
+                database.id,
+            );
+            const userId = typeof content?.userId === "string" ? content.userId : "";
+            setSharedLocks((prev) => ({ ...prev, [database.id]: userId ? { userId } : null }));
+        } catch {
+            setSharedLocks((prev) => ({ ...prev, [database.id]: null }));
+        }
+    };
+
+    const handleTakeEditLock = async (): Promise<void> => {
+        if (!activeDatabase.sharedRoomId) return;
+        setIsBusy(true);
+        try {
+            await cli.sendStateEvent(
+                activeDatabase.sharedRoomId,
+                SHARED_DB_LOCK_EVENT_TYPE,
+                { userId: cli.getUserId() },
+                activeDatabase.id,
+            );
+            setSharedLocks((prev) => ({ ...prev, [activeDatabase.id]: { userId: cli.getUserId() ?? "" } }));
+            setStatusMessage(_t("settings|server_vault|lock_acquired"));
+        } catch {
+            setStatusMessage(_t("settings|server_vault|lock_failed"));
+        } finally {
+            setIsBusy(false);
+        }
+    };
+
+    const handleReleaseEditLock = async (): Promise<void> => {
+        if (!activeDatabase.sharedRoomId) return;
+        setIsBusy(true);
+        try {
+            await cli.sendStateEvent(
+                activeDatabase.sharedRoomId,
+                SHARED_DB_LOCK_EVENT_TYPE,
+                { userId: "" },
+                activeDatabase.id,
+            );
+            setSharedLocks((prev) => ({ ...prev, [activeDatabase.id]: null }));
+            setStatusMessage(_t("settings|server_vault|lock_released"));
+        } catch {
+            setStatusMessage(_t("settings|server_vault|lock_failed"));
+        } finally {
+            setIsBusy(false);
+        }
+    };
+
+    const handleSyncSharedDatabase = async (): Promise<void> => {
+        if (!activeDatabase.sharedRoomId) return;
+        if (!password) {
+            setStatusMessage(_t("settings|server_vault|password_required"));
+            return;
+        }
+        if (isReadOnly) {
+            setStatusMessage(_t("settings|server_vault|read_only"));
+            return;
+        }
+        setIsBusy(true);
+        try {
+            const sharedVault = normalizeVault({
+                ...vault,
+                databases: [activeDatabase],
+            });
+            const encrypted = await encryptServerVault(sharedVault, password);
+            await cli.sendStateEvent(
+                activeDatabase.sharedRoomId,
+                SHARED_DB_EVENT_TYPE,
+                encrypted,
+                activeDatabase.id,
+            );
+            setStatusMessage(_t("settings|server_vault|shared_sync_success"));
+        } catch {
+            setStatusMessage(_t("settings|server_vault|shared_sync_failed"));
+        } finally {
+            setIsBusy(false);
+        }
+    };
+
+    const handleLoadSharedDatabase = async (): Promise<void> => {
+        if (!activeDatabase.sharedRoomId) return;
+        if (!password) {
+            setStatusMessage(_t("settings|server_vault|password_required"));
+            return;
+        }
+        setIsBusy(true);
+        try {
+            const encrypted = (await cli.getStateEvent(
+                activeDatabase.sharedRoomId,
+                SHARED_DB_EVENT_TYPE,
+                activeDatabase.id,
+            )) as EncryptedServerVaultPayload;
+            const decrypted = normalizeVault(await decryptServerVault(encrypted, password));
+            const mergeResult = mergeServerVaults(normalizeVault(vault), decrypted);
+            setVault(mergeResult.merged);
+            setActiveDatabaseId(mergeResult.merged.databases[0].id);
+            setStatusMessage(
+                mergeResult.hasConflicts
+                    ? _t("settings|server_vault|sync_conflict_resolved")
+                    : _t("settings|server_vault|shared_load_success"),
+            );
+        } catch {
+            setStatusMessage(_t("settings|server_vault|shared_load_failed"));
+        } finally {
+            setIsBusy(false);
+        }
     };
 
     const saveLocalPayload = (payload: EncryptedServerVaultPayload): void => {
@@ -270,9 +413,11 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             name: "",
             url: "",
             notes: "",
+            updatedAt: Date.now(),
         };
         setVault((prev) => ({
             ...prev,
+            updatedAt: Date.now(),
             hosters: [...prev.hosters, hoster],
         }));
     };
@@ -280,6 +425,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const removeHoster = (hosterId: string): void => {
         setVault((prev) => ({
             ...prev,
+            updatedAt: Date.now(),
             hosters: prev.hosters.filter((hoster) => hoster.id !== hosterId),
         }));
     };
@@ -295,7 +441,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         }
         setIsBusy(true);
         try {
-            const encrypted = await encryptServerVault(vault, password);
+            const encrypted = await encryptServerVault(normalizeVault(vault), password);
             saveLocalPayload(encrypted);
             await downloadFile("server-vault.encrypted.json", JSON.stringify(encrypted, null, 2));
             setStatusMessage(_t("settings|server_vault|export_success"));
@@ -318,9 +464,11 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             const text = await file.text();
             const payload = JSON.parse(text) as EncryptedServerVaultPayload;
             const decrypted = normalizeVault(await decryptServerVault(payload, password));
-            setVault(decrypted);
-            setActiveDatabaseId(decrypted.databases[0].id);
-            saveLocalPayload(payload);
+            const mergeResult = mergeServerVaults(normalizeVault(vault), decrypted);
+            setVault(mergeResult.merged);
+            setActiveDatabaseId(mergeResult.merged.databases[0].id);
+            const encryptedMerged = await encryptServerVault(mergeResult.merged, password);
+            saveLocalPayload(encryptedMerged);
             setStatusMessage(_t("settings|server_vault|import_success"));
         } catch (error) {
             setStatusMessage(_t("settings|server_vault|import_failed"));
@@ -339,7 +487,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         }
         setIsBusy(true);
         try {
-            const encrypted = await encryptServerVault(vault, password);
+            const encrypted = await encryptServerVault(normalizeVault(vault), password);
             await cli.setAccountData(ACCOUNT_DATA_TYPE, encrypted);
             saveLocalPayload(encrypted);
             setStatusMessage(_t("settings|server_vault|sync_success"));
@@ -361,11 +509,19 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
             if (!data?.ciphertext) {
                 setStatusMessage(_t("settings|server_vault|no_remote_data"));
             } else {
-                const decrypted = normalizeVault(await decryptServerVault(data, password));
-                setVault(decrypted);
-                setActiveDatabaseId(decrypted.databases[0].id);
-                saveLocalPayload(data);
-                setStatusMessage(_t("settings|server_vault|import_success"));
+                const remoteVault = normalizeVault(await decryptServerVault(data, password));
+                const localVault = normalizeVault(vault);
+                const mergeResult = mergeServerVaults(localVault, remoteVault);
+                setVault(mergeResult.merged);
+                setActiveDatabaseId(mergeResult.merged.databases[0].id);
+                const encryptedMerged = await encryptServerVault(mergeResult.merged, password);
+                await cli.setAccountData(ACCOUNT_DATA_TYPE, encryptedMerged);
+                saveLocalPayload(encryptedMerged);
+                setStatusMessage(
+                    mergeResult.hasConflicts
+                        ? _t("settings|server_vault|sync_conflict_resolved")
+                        : _t("settings|server_vault|import_success"),
+                );
             }
         } catch (error) {
             setStatusMessage(_t("settings|server_vault|import_failed"));
@@ -381,7 +537,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         }
         setIsBusy(true);
         try {
-            const encrypted = await encryptServerVault(vault, password);
+            const encrypted = await encryptServerVault(normalizeVault(vault), password);
             saveLocalPayload(encrypted);
             setStatusMessage(_t("settings|server_vault|local_save_success"));
         } catch (error) {
@@ -403,8 +559,9 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                 setStatusMessage(_t("settings|server_vault|no_local_data"));
             } else {
                 const decrypted = normalizeVault(await decryptServerVault(payload, password));
-                setVault(decrypted);
-                setActiveDatabaseId(decrypted.databases[0].id);
+                const mergeResult = mergeServerVaults(normalizeVault(vault), decrypted);
+                setVault(mergeResult.merged);
+                setActiveDatabaseId(mergeResult.merged.databases[0].id);
                 setStatusMessage(_t("settings|server_vault|local_load_success"));
             }
         } catch (error) {
@@ -549,7 +706,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                 </AccessibleButton>
                             </div>
                         ))}
-                        <AccessibleButton kind="secondary" onClick={addDatabase}>
+                        <AccessibleButton kind="secondary" onClick={addDatabase} disabled={isReadOnly}>
                             {_t("settings|server_vault|add_db")}
                         </AccessibleButton>
                     </div>
@@ -558,6 +715,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                             element="input"
                             label={_t("settings|server_vault|db_name")}
                             value={activeDatabase.name}
+                            disabled={isReadOnly}
                             onChange={(event) =>
                                 updateDatabase(activeDatabase.id, (database) => ({
                                     ...database,
@@ -565,6 +723,64 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                 }))
                             }
                         />
+                        <div className="mx_ServerVaultUserSettingsTab_sharedControls">
+                            <Field
+                                element="input"
+                                label={_t("settings|server_vault|shared_room_id")}
+                                value={activeDatabase.sharedRoomId}
+                                disabled={isReadOnly}
+                                onChange={(event) =>
+                                    updateDatabase(activeDatabase.id, (database) => ({
+                                        ...database,
+                                        sharedRoomId: event.target.value,
+                                    }))
+                                }
+                            />
+                            <div className="mx_ServerVaultUserSettingsTab_storageButtons">
+                                <AccessibleButton
+                                    kind="secondary"
+                                    onClick={() => refreshSharedLock(activeDatabase)}
+                                    disabled={!activeDatabase.sharedRoomId || isBusy}
+                                >
+                                    {_t("settings|server_vault|check_lock")}
+                                </AccessibleButton>
+                                <AccessibleButton
+                                    kind="secondary"
+                                    onClick={handleTakeEditLock}
+                                    disabled={!activeDatabase.sharedRoomId || isBusy}
+                                >
+                                    {_t("settings|server_vault|take_lock")}
+                                </AccessibleButton>
+                                <AccessibleButton
+                                    kind="secondary"
+                                    onClick={handleReleaseEditLock}
+                                    disabled={!activeDatabase.sharedRoomId || isBusy || !activeLockOwner}
+                                >
+                                    {_t("settings|server_vault|release_lock")}
+                                </AccessibleButton>
+                                <AccessibleButton
+                                    kind="primary"
+                                    onClick={handleLoadSharedDatabase}
+                                    disabled={!activeDatabase.sharedRoomId || isBusy}
+                                >
+                                    {_t("settings|server_vault|load_shared")}
+                                </AccessibleButton>
+                                <AccessibleButton
+                                    kind="primary"
+                                    onClick={handleSyncSharedDatabase}
+                                    disabled={!activeDatabase.sharedRoomId || isBusy || isReadOnly}
+                                >
+                                    {_t("settings|server_vault|sync_shared")}
+                                </AccessibleButton>
+                            </div>
+                            {activeDatabase.sharedRoomId && (
+                                <div className="mx_ServerVaultUserSettingsTab_status">
+                                    {activeLockOwner
+                                        ? _t("settings|server_vault|lock_owned", { userId: activeLockOwner })
+                                        : _t("settings|server_vault|lock_unclaimed")}
+                                </div>
+                            )}
+                        </div>
                         <div className="mx_ServerVaultUserSettingsTab_records">
                             <div className="mx_ServerVaultUserSettingsTab_recordsHeader">
                                 <span>{_t("settings|server_vault|table_ip")}</span>
@@ -593,6 +809,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="input"
                                                         label={_t("settings|server_vault|field_server_name")}
                                                         value={entry.serverName}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -612,6 +829,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="input"
                                                         label={_t("settings|server_vault|field_ip")}
                                                         value={entry.ipAddress}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -632,6 +850,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         label={_t("settings|server_vault|field_country")}
                                                         value={entry.country}
                                                         list={datalistId}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -652,6 +871,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         label={_t("settings|server_vault|field_hoster")}
                                                         value={entry.hosterName}
                                                         list={hostersListId}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -671,6 +891,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="input"
                                                         label={_t("settings|server_vault|field_ssh_port")}
                                                         value={entry.sshPort}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -690,6 +911,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="textarea"
                                                         label={_t("settings|server_vault|field_ssh_key")}
                                                         value={entry.sshKey}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -710,6 +932,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         type="password"
                                                         label={_t("settings|server_vault|field_root_password")}
                                                         value={entry.rootPassword}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -729,6 +952,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="textarea"
                                                         label={_t("settings|server_vault|field_additional_users")}
                                                         value={entry.additionalUsers}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -748,6 +972,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="textarea"
                                                         label={_t("settings|server_vault|field_quick_commands")}
                                                         value={entry.quickCommands}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -767,6 +992,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="input"
                                                         label={_t("settings|server_vault|field_dropbear_port")}
                                                         value={entry.dropbearPort}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -786,6 +1012,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="textarea"
                                                         label={_t("settings|server_vault|field_dropbear_key")}
                                                         value={entry.dropbearKey}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -806,6 +1033,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         type="password"
                                                         label={_t("settings|server_vault|field_dropbear_luks")}
                                                         value={entry.dropbearLuksPassword}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -825,6 +1053,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="textarea"
                                                         label={_t("settings|server_vault|field_luks_disks")}
                                                         value={entry.luksDiskPasswords}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -845,6 +1074,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         type="date"
                                                         label={_t("settings|server_vault|field_purchase_date")}
                                                         value={entry.purchaseDate}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -865,6 +1095,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         type="date"
                                                         label={_t("settings|server_vault|field_renewal_date")}
                                                         value={entry.renewalDate}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -884,6 +1115,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="input"
                                                         label={_t("settings|server_vault|field_price")}
                                                         value={entry.price}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -904,6 +1136,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         label={_t("settings|server_vault|field_currency")}
                                                         value={entry.currency}
                                                         list={currenciesListId}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -923,6 +1156,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="input"
                                                         label={_t("settings|server_vault|field_hoster_login")}
                                                         value={entry.hosterLogin}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -943,6 +1177,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         type="password"
                                                         label={_t("settings|server_vault|field_hoster_password")}
                                                         value={entry.hosterPassword}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -962,6 +1197,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="input"
                                                         label={_t("settings|server_vault|field_email_login")}
                                                         value={entry.emailLogin}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -982,6 +1218,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         type="password"
                                                         label={_t("settings|server_vault|field_email_password")}
                                                         value={entry.emailPassword}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -1001,6 +1238,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                                         element="textarea"
                                                         label={_t("settings|server_vault|field_notes")}
                                                         value={entry.notes}
+                                                        disabled={isReadOnly}
                                                         onChange={(event) =>
                                                             updateEntry(entry.id, (item) => ({
                                                                 ...item,
@@ -1022,7 +1260,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                     </div>
                                 );
                             })}
-                            <AccessibleButton kind="primary" onClick={addEntry}>
+                            <AccessibleButton kind="primary" onClick={addEntry} disabled={isReadOnly}>
                                 {_t("settings|server_vault|add_entry")}
                             </AccessibleButton>
                         </div>
@@ -1058,6 +1296,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                     <AccessibleButton
                                         kind="link"
                                         onClick={() => removeListValue("countries", country)}
+                                        disabled={isReadOnly}
                                     >
                                         {_t("settings|server_vault|remove")}
                                     </AccessibleButton>
@@ -1069,6 +1308,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                 element="input"
                                 label={_t("settings|server_vault|add_country")}
                                 value={newCountry}
+                                disabled={isReadOnly}
                                 onChange={(event) => setNewCountry(event.target.value)}
                                 onBlur={() => {
                                     updateListValue("countries", newCountry);
@@ -1077,6 +1317,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                             />
                             <AccessibleButton
                                 kind="secondary"
+                                disabled={isReadOnly}
                                 onClick={() => {
                                     updateListValue("countries", newCountry);
                                     setNewCountry("");
@@ -1098,6 +1339,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                     <AccessibleButton
                                         kind="link"
                                         onClick={() => removeListValue("currencies", currency)}
+                                        disabled={isReadOnly}
                                     >
                                         {_t("settings|server_vault|remove")}
                                     </AccessibleButton>
@@ -1109,6 +1351,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                 element="input"
                                 label={_t("settings|server_vault|add_currency")}
                                 value={newCurrency}
+                                disabled={isReadOnly}
                                 onChange={(event) => setNewCurrency(event.target.value)}
                                 onBlur={() => {
                                     updateListValue("currencies", newCurrency);
@@ -1117,6 +1360,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                             />
                             <AccessibleButton
                                 kind="secondary"
+                                disabled={isReadOnly}
                                 onClick={() => {
                                     updateListValue("currencies", newCurrency);
                                     setNewCurrency("");
@@ -1137,6 +1381,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                     element="input"
                                     label={_t("settings|server_vault|hoster_name")}
                                     value={hoster.name}
+                                    disabled={isReadOnly}
                                     onChange={(event) =>
                                         updateHoster(hoster.id, (item) => ({
                                             ...item,
@@ -1148,6 +1393,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                     element="input"
                                     label={_t("settings|server_vault|hoster_url")}
                                     value={hoster.url}
+                                    disabled={isReadOnly}
                                     onChange={(event) =>
                                         updateHoster(hoster.id, (item) => ({
                                             ...item,
@@ -1159,6 +1405,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                     element="textarea"
                                     label={_t("settings|server_vault|hoster_notes")}
                                     value={hoster.notes}
+                                    disabled={isReadOnly}
                                     onChange={(event) =>
                                         updateHoster(hoster.id, (item) => ({
                                             ...item,
@@ -1166,12 +1413,12 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                         }))
                                     }
                                 />
-                                <AccessibleButton kind="danger" onClick={() => removeHoster(hoster.id)}>
+                                <AccessibleButton kind="danger" onClick={() => removeHoster(hoster.id)} disabled={isReadOnly}>
                                     {_t("settings|server_vault|remove")}
                                 </AccessibleButton>
                             </div>
                         ))}
-                        <AccessibleButton kind="secondary" onClick={addHoster}>
+                        <AccessibleButton kind="secondary" onClick={addHoster} disabled={isReadOnly}>
                             {_t("settings|server_vault|add_hoster")}
                         </AccessibleButton>
                     </div>
@@ -1188,6 +1435,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                         onChange={(event) =>
                             setVault((prev) => ({
                                 ...prev,
+                                updatedAt: Date.now(),
                                 reminderRoomId: event.target.value,
                             }))
                         }

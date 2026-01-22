@@ -15,10 +15,11 @@ describe("serverVaultSync", () => {
             updatedAt: 1,
             databases: [
                 {
-                    id: "db-1",
-                    name: "Primary",
-                    updatedAt: 1,
-                    entries: [
+                id: "db-1",
+                name: "Primary",
+                updatedAt: 1,
+                sharedRoomId: "",
+                entries: [
                         {
                             id: "entry-1",
                             serverName: "Old",

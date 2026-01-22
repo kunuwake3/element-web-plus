@@ -7,7 +7,13 @@ Please see LICENSE files in the repository root for full details.
 
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
-const CRYPTO = globalThis.crypto;
+
+const getCrypto = (): Crypto => {
+    if (!globalThis.crypto) {
+        throw new Error("WebCrypto is not available");
+    }
+    return globalThis.crypto;
+};
 
 const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
@@ -20,6 +26,8 @@ export interface ServerVaultDatabase {
     id: string;
     name: string;
     entries: ServerVaultEntry[];
+    updatedAt: number;
+    sharedRoomId: string;
 }
 
 export interface ServerVaultEntry {
@@ -46,6 +54,7 @@ export interface ServerVaultEntry {
     emailLogin: string;
     emailPassword: string;
     notes: string;
+    updatedAt: number;
 }
 
 export interface ServerVaultHoster {
@@ -53,6 +62,7 @@ export interface ServerVaultHoster {
     name: string;
     url: string;
     notes: string;
+    updatedAt: number;
 }
 
 export interface ServerVaultData {
@@ -62,6 +72,7 @@ export interface ServerVaultData {
     countries: string[];
     currencies: string[];
     reminderRoomId: string;
+    updatedAt: number;
 }
 
 export interface EncryptedServerVaultPayload {
@@ -82,10 +93,11 @@ const decodeBase64 = (value: string): ArrayBuffer => {
 };
 
 const deriveKey = async (password: string, salt: ArrayBuffer): Promise<CryptoKey> => {
-    const keyMaterial = await CRYPTO.subtle.importKey("raw", TEXT_ENCODER.encode(password), "PBKDF2", false, [
+    const crypto = getCrypto();
+    const keyMaterial = await crypto.subtle.importKey("raw", TEXT_ENCODER.encode(password), "PBKDF2", false, [
         "deriveKey",
     ]);
-    return CRYPTO.subtle.deriveKey(
+    return crypto.subtle.deriveKey(
         {
             name: "PBKDF2",
             salt,
@@ -106,11 +118,12 @@ export const encryptServerVault = async (
     data: ServerVaultData,
     password: string,
 ): Promise<EncryptedServerVaultPayload> => {
-    const salt = CRYPTO.getRandomValues(new Uint8Array(SALT_LENGTH));
-    const iv = CRYPTO.getRandomValues(new Uint8Array(IV_LENGTH));
+    const crypto = getCrypto();
+    const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+    const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
     const key = await deriveKey(password, salt.buffer);
     const plaintext = TEXT_ENCODER.encode(JSON.stringify(data));
-    const ciphertext = await CRYPTO.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
+    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
     return {
         version: SERVER_VAULT_VERSION,
         salt: encodeBase64(salt.buffer),
@@ -126,8 +139,9 @@ export const decryptServerVault = async (
     const salt = decodeBase64(payload.salt);
     const iv = decodeBase64(payload.iv);
     const ciphertext = decodeBase64(payload.ciphertext);
+    const crypto = getCrypto();
     const key = await deriveKey(password, salt);
-    const plaintext = await CRYPTO.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(iv) }, key, ciphertext);
+    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(iv) }, key, ciphertext);
     const parsed = JSON.parse(TEXT_DECODER.decode(plaintext)) as ServerVaultData;
     if (parsed.version !== SERVER_VAULT_VERSION) {
         throw new Error(`Unsupported vault version ${parsed.version}`);

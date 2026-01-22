@@ -22,6 +22,7 @@ const ensureDatabaseTimestamp = (database: ServerVaultDatabase, fallback: number
     ...database,
     updatedAt: database.updatedAt ?? fallback,
     entries: database.entries.map((entry) => ensureEntryTimestamp(entry, fallback)),
+    sharedRoomId: database.sharedRoomId ?? "",
 });
 
 const ensureHosterTimestamp = (hoster: ServerVaultHoster, fallback: number): ServerVaultHoster => ({
