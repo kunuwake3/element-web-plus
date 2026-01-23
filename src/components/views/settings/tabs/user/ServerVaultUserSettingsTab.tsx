@@ -165,20 +165,19 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [sharedLocks, setSharedLocks] = useState<Record<string, { userId: string } | null>>({});
 
-    const refreshSharedLock = React.useCallback(async (database: ServerVaultDatabase): Promise<void> => {
-        if (!database.sharedRoomId) return;
-        try {
-            const content = await cli.getStateEvent(
-                database.sharedRoomId,
-                SHARED_DB_LOCK_EVENT_TYPE,
-                database.id,
-            );
-            const userId = typeof content?.userId === "string" ? content.userId : "";
-            setSharedLocks((prev) => ({ ...prev, [database.id]: userId ? { userId } : null }));
-        } catch {
-            setSharedLocks((prev) => ({ ...prev, [database.id]: null }));
-        }
-    }, [cli]);
+    const refreshSharedLock = React.useCallback(
+        async (database: ServerVaultDatabase): Promise<void> => {
+            if (!database.sharedRoomId) return;
+            try {
+                const content = await cli.getStateEvent(database.sharedRoomId, SHARED_DB_LOCK_EVENT_TYPE, database.id);
+                const userId = typeof content?.userId === "string" ? content.userId : "";
+                setSharedLocks((prev) => ({ ...prev, [database.id]: userId ? { userId } : null }));
+            } catch {
+                setSharedLocks((prev) => ({ ...prev, [database.id]: null }));
+            }
+        },
+        [cli],
+    );
 
     React.useEffect(() => {
         const accountData = cli.getAccountData(ACCOUNT_DATA_TYPE);
@@ -207,7 +206,10 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
         }
     }, [activeDatabase, refreshSharedLock]);
 
-    const updateDatabase = (databaseId: string, updater: (database: ServerVaultDatabase) => ServerVaultDatabase): void => {
+    const updateDatabase = (
+        databaseId: string,
+        updater: (database: ServerVaultDatabase) => ServerVaultDatabase,
+    ): void => {
         setVault((prev) => ({
             ...prev,
             updatedAt: Date.now(),
@@ -355,12 +357,7 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                 databases: [activeDatabase],
             });
             const encrypted = await encryptServerVault(sharedVault, password);
-            await cli.sendStateEvent(
-                activeDatabase.sharedRoomId,
-                SHARED_DB_EVENT_TYPE,
-                encrypted,
-                activeDatabase.id,
-            );
+            await cli.sendStateEvent(activeDatabase.sharedRoomId, SHARED_DB_EVENT_TYPE, encrypted, activeDatabase.id);
             setStatusMessage(_t("settings|server_vault|shared_sync_success"));
         } catch {
             setStatusMessage(_t("settings|server_vault|shared_sync_failed"));
@@ -674,7 +671,9 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                 />
                             </label>
                         </div>
-                        <SettingsSubsectionText>{_t("settings|server_vault|local_storage_help")}</SettingsSubsectionText>
+                        <SettingsSubsectionText>
+                            {_t("settings|server_vault|local_storage_help")}
+                        </SettingsSubsectionText>
                         {statusMessage && (
                             <div className="mx_ServerVaultUserSettingsTab_status" role="status">
                                 {statusMessage}
@@ -1287,7 +1286,8 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
 
             <SettingsSection heading={_t("settings|server_vault|lists_title")}>
                 <SettingsSubsectionText>{_t("settings|server_vault|lists_description")}</SettingsSubsectionText>
-                <SettingsSubsection heading={_t("settings|server_vault|countries_title")}
+                <SettingsSubsection
+                    heading={_t("settings|server_vault|countries_title")}
                     description={_t("settings|server_vault|countries_description")}
                 >
                     <div className="mx_ServerVaultUserSettingsTab_listEditor">
@@ -1330,7 +1330,8 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                         </div>
                     </div>
                 </SettingsSubsection>
-                <SettingsSubsection heading={_t("settings|server_vault|currencies_title")}
+                <SettingsSubsection
+                    heading={_t("settings|server_vault|currencies_title")}
                     description={_t("settings|server_vault|currencies_description")}
                 >
                     <div className="mx_ServerVaultUserSettingsTab_listEditor">
@@ -1373,7 +1374,8 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                         </div>
                     </div>
                 </SettingsSubsection>
-                <SettingsSubsection heading={_t("settings|server_vault|hosters_title")}
+                <SettingsSubsection
+                    heading={_t("settings|server_vault|hosters_title")}
                     description={_t("settings|server_vault|hosters_description")}
                 >
                     <div className="mx_ServerVaultUserSettingsTab_hosters">
@@ -1415,7 +1417,11 @@ const ServerVaultUserSettingsTab: React.FC = (): JSX.Element => {
                                         }))
                                     }
                                 />
-                                <AccessibleButton kind="danger" onClick={() => removeHoster(hoster.id)} disabled={isReadOnly}>
+                                <AccessibleButton
+                                    kind="danger"
+                                    onClick={() => removeHoster(hoster.id)}
+                                    disabled={isReadOnly}
+                                >
                                     {_t("settings|server_vault|remove")}
                                 </AccessibleButton>
                             </div>

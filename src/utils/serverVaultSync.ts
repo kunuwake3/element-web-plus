@@ -49,7 +49,10 @@ export interface MergeResult {
     hasConflicts: boolean;
 }
 
-const mergeEntries = (local: ServerVaultEntry, remote: ServerVaultEntry): { merged: ServerVaultEntry; conflict: boolean } => {
+const mergeEntries = (
+    local: ServerVaultEntry,
+    remote: ServerVaultEntry,
+): { merged: ServerVaultEntry; conflict: boolean } => {
     if (local.updatedAt === remote.updatedAt) {
         return { merged: local, conflict: false };
     }
@@ -91,7 +94,10 @@ const mergeDatabases = (
     };
 };
 
-const mergeHosters = (local: ServerVaultHoster, remote: ServerVaultHoster): { merged: ServerVaultHoster; conflict: boolean } => {
+const mergeHosters = (
+    local: ServerVaultHoster,
+    remote: ServerVaultHoster,
+): { merged: ServerVaultHoster; conflict: boolean } => {
     if (local.updatedAt === remote.updatedAt) {
         return { merged: local, conflict: false };
     }
@@ -145,9 +151,10 @@ export const mergeServerVaults = (local: ServerVaultData, remote: ServerVaultDat
             hosters: mergedHosters,
             countries,
             currencies,
-            reminderRoomId: normalizedLocal.updatedAt >= normalizedRemote.updatedAt
-                ? normalizedLocal.reminderRoomId
-                : normalizedRemote.reminderRoomId,
+            reminderRoomId:
+                normalizedLocal.updatedAt >= normalizedRemote.updatedAt
+                    ? normalizedLocal.reminderRoomId
+                    : normalizedRemote.reminderRoomId,
         },
         hasConflicts,
     };
