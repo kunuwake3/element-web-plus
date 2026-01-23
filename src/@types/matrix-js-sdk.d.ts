@@ -48,6 +48,15 @@ declare module "matrix-js-sdk/src/types" {
         // Element custom state events
         "im.vector.web.settings": Record<string, any>;
         "org.matrix.room.preview_urls": { disable: boolean };
+        "com.element-web-plus.server_vault.shared_db.v1": {
+            version: number;
+            salt: string;
+            iv: string;
+            ciphertext: string;
+        };
+        "com.element-web-plus.server_vault.shared_db_lock.v1": {
+            userId: string;
+        };
 
         // XXX unspecced usages of `m.room.*` events
         "m.room.plumbing": {
@@ -102,6 +111,12 @@ declare module "matrix-js-sdk/src/types" {
 
         // Indicate whether recovery is enabled or disabled
         "io.element.recovery": { enabled: boolean };
+        "com.element-web-plus.server_vault.v1": {
+            version: number;
+            salt: string;
+            iv: string;
+            ciphertext: string;
+        };
     }
 
     export interface AudioContent {
